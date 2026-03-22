@@ -81,8 +81,24 @@ func initializePostgres(config DatabaseConfig) (*sqlx.DB, error) {
 		return nil, fmt.Errorf("failed to open postgres connection: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping postgres database: %w", err)
+	// Retry connection to handle cases where PostgreSQL is still starting up
+	// (common in container orchestration where services start in parallel)
+	const maxRetries = 30
+	const retryInterval = 2 * time.Second
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if err := db.Ping(); err != nil {
+			if attempt == maxRetries {
+				return nil, fmt.Errorf("failed to ping postgres database after %d attempts: %w", maxRetries, err)
+			}
+			fmt.Printf("Waiting for PostgreSQL to be ready (attempt %d/%d): %v\n", attempt, maxRetries, err)
+			time.Sleep(retryInterval)
+			continue
+		}
+		if attempt > 1 {
+			fmt.Printf("PostgreSQL connection established after %d attempts\n", attempt)
+		}
+		break
 	}
 
 	return db, nil
